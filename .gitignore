@@ -1,0 +1,6 @@
+build/
+assets/
+buildrsp.txt
+*.png
+*.ico
+*.exe
