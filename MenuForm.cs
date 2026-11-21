@@ -6,6 +6,7 @@ using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -21,6 +22,24 @@ namespace BS
         const int HitPlay = 5;
         const int HitPath = 6;
         const int HitScan = 7;
+        const int HitResL = 8;
+        const int HitResR = 9;
+
+        struct ScreenMode
+        {
+            public int W;
+            public int H;
+            public string Name;
+            public bool Screen;
+        }
+
+        static readonly ScreenMode[] Modes = {
+            new ScreenMode { W = 640, H = 480, Name = "640x480", Screen = false },
+            new ScreenMode { W = 960, H = 720, Name = "960x720", Screen = false },
+            new ScreenMode { W = 1280, H = 960, Name = "1280x960", Screen = false },
+            new ScreenMode { W = 1600, H = 1200, Name = "1600x1200", Screen = false },
+            new ScreenMode { W = 0, H = 0, Name = "Экран", Screen = true }
+        };
 
         static readonly Color Ink = Color.FromArgb(12, 0, 6);
         static readonly Color Label = Color.FromArgb(198, 228, 255);
@@ -38,6 +57,7 @@ namespace BS
         float scale = 1f;
         int border, topH, divH, botH;
         int sel;
+        int mode;
         int hoverCmd;
         int pressed;
         bool blink = true;
@@ -80,7 +100,7 @@ namespace BS
         volatile bool deepMode;
         Thread scanThread;
 
-        Rectangle rClose, rMin, rRow1, rRow2, rPlay, rPath, rScan;
+        Rectangle rClose, rMin, rRow1, rRow2, rPlay, rPath, rScan, rResL, rResR;
 
         [DllImport("user32.dll")]
         static extern bool ReleaseCapture();
@@ -157,7 +177,7 @@ namespace BS
             border = S(16);
             topH = S(172);
             divH = S(12);
-            botH = S(78);
+            botH = S(108);
             int width = S(520);
             int height = border + topH + divH + botH + border;
             ClientSize = new Size(width, height);
@@ -179,10 +199,13 @@ namespace BS
             rClose = new Rectangle(width - S(8) - btn, S(6), btn, btn);
             rMin = new Rectangle(rClose.X - S(6) - btn, S(6), btn, btn);
 
-            int cmdY = botY + S(40);
-            rPlay = new Rectangle(innerX, cmdY, S(110), S(24));
-            rPath = new Rectangle(innerX + S(120), cmdY, S(90), S(24));
-            rScan = new Rectangle(innerX + S(220), cmdY, S(140), S(24));
+            int resY = botY + S(32);
+            rResL = new Rectangle(innerX, resY, S(22), S(22));
+            rResR = new Rectangle(innerX + S(148), resY, S(22), S(22));
+            int cmdY = botY + S(60);
+            rPlay = new Rectangle(innerX, cmdY, S(120), S(26));
+            rPath = new Rectangle(innerX + S(132), cmdY, S(80), S(26));
+            rScan = new Rectangle(innerX + S(220), cmdY, S(120), S(26));
 
             if (skin != null) { skin.Dispose(); skin = null; }
             if (plate != null) { plate.Dispose(); plate = null; }
@@ -320,7 +343,8 @@ namespace BS
                 DrawRow(g, rRow1, sel == 0, "BLACK SOULS", path1);
                 DrawRow(g, rRow2, sel == 1, "BLACK SOULS II", path2);
                 string scanLabel = ScanCaption();
-                DrawCommand(g, rPlay, "Играть", hoverCmd == HitPlay);
+                DrawResolution(g);
+                DrawCommand(g, rPlay, "Запуск", hoverCmd == HitPlay);
                 DrawCommand(g, rPath, "Путь", hoverCmd == HitPath);
                 DrawCommand(g, rScan, scanLabel, hoverCmd == HitScan);
                 if (scanning || Missing())
@@ -428,6 +452,15 @@ namespace BS
                 g.FillPolygon(br, pts);
         }
 
+        void DrawResolution(Graphics g)
+        {
+            string name = Modes[mode].Name;
+            DrawText(g, "<", fontText, rResL.X + S(2), rResL.Y, hoverCmd == HitResL ? Paper : Label);
+            DrawText(g, name, fontText, rResL.Right + S(8), rResL.Y, Paper);
+            DrawText(g, ">", fontText, rResR.X + S(2), rResR.Y, hoverCmd == HitResR ? Paper : Label);
+            DrawText(g, "Разрешение", fontSmall, rResR.Right + S(14), rResL.Y + S(2), Label);
+        }
+
         void DrawCommand(Graphics g, Rectangle r, string caption, bool hot)
         {
             if (hot)
@@ -517,6 +550,9 @@ namespace BS
             if (rPlay.Contains(p)) return HitPlay;
             if (rPath.Contains(p)) return HitPath;
             if (rScan.Contains(p)) return HitScan;
+            if (rResL.Contains(p)) return HitResL;
+            if (rResR.Contains(p)) return HitResR;
+            if (new Rectangle(rResL.X, rResL.Y, rResR.Right - rResL.X, rResL.Height).Contains(p)) return HitResR;
             if (rRow1.Contains(p)) return HitRow1;
             if (rRow2.Contains(p)) return HitRow2;
             return 0;
@@ -527,7 +563,7 @@ namespace BS
             base.OnMouseMove(e);
             int hit = HitTest(e.Location);
             int cmd = 0;
-            if (hit == HitClose || hit == HitMin || hit == HitPlay || hit == HitPath || hit == HitScan) cmd = hit;
+            if (hit == HitClose || hit == HitMin || hit == HitPlay || hit == HitPath || hit == HitScan || hit == HitResL || hit == HitResR) cmd = hit;
             if (hit == HitRow1 && sel != 0) { sel = 0; blink = true; }
             if (hit == HitRow2 && sel != 1) { sel = 1; blink = true; }
             if (cmd != hoverCmd || hit == HitRow1 || hit == HitRow2)
@@ -567,14 +603,6 @@ namespace BS
             pressed = 0;
         }
 
-        protected override void OnMouseDoubleClick(MouseEventArgs e)
-        {
-            base.OnMouseDoubleClick(e);
-            int hit = HitTest(e.Location);
-            if (hit == HitRow1) Launch(1);
-            else if (hit == HitRow2) Launch(2);
-        }
-
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
             if (keyData == Keys.Escape) { Close(); return true; }
@@ -585,9 +613,11 @@ namespace BS
                 Touch();
                 return true;
             }
+            if (keyData == Keys.Left) { StepMode(-1); return true; }
+            if (keyData == Keys.Right) { StepMode(1); return true; }
             if (keyData == Keys.Enter) { Launch(sel == 0 ? 1 : 2); return true; }
-            if (keyData == Keys.D1 || keyData == Keys.NumPad1) { Launch(1); return true; }
-            if (keyData == Keys.D2 || keyData == Keys.NumPad2) { Launch(2); return true; }
+            if (keyData == Keys.D1 || keyData == Keys.NumPad1) { sel = 0; blink = true; Touch(); return true; }
+            if (keyData == Keys.D2 || keyData == Keys.NumPad2) { sel = 1; blink = true; Touch(); return true; }
             return base.ProcessCmdKey(ref msg, keyData);
         }
 
@@ -598,6 +628,8 @@ namespace BS
             else if (hit == HitRow1) sel = 0;
             else if (hit == HitRow2) sel = 1;
             else if (hit == HitPlay) Launch(sel == 0 ? 1 : 2);
+            else if (hit == HitResL) StepMode(-1);
+            else if (hit == HitResR) StepMode(1);
             else if (hit == HitPath) Browse(sel == 0 ? 1 : 2);
             else if (hit == HitScan) OnScan();
             Touch();
@@ -656,6 +688,13 @@ namespace BS
                         shown2 = 100000;
                         search.Pin(2);
                     }
+                    object savedMode = k.GetValue("Resolution");
+                    if (savedMode != null)
+                    {
+                        int parsed;
+                        if (int.TryParse(savedMode.ToString(), out parsed) && parsed >= 0 && parsed < Modes.Length)
+                            mode = parsed;
+                    }
                 }
             }
             catch { }
@@ -671,9 +710,18 @@ namespace BS
                     if (k == null) return;
                     k.SetValue("Path1", path1 ?? "");
                     k.SetValue("Path2", path2 ?? "");
+                    k.SetValue("Resolution", mode);
                 }
             }
             catch { }
+        }
+
+        void StepMode(int dir)
+        {
+            mode = (mode + dir) % Modes.Length;
+            if (mode < 0) mode += Modes.Length;
+            SavePaths();
+            Touch();
         }
 
         void Launch(int part)
@@ -703,10 +751,15 @@ namespace BS
                     {
                         if (string.Equals(procs[i].MainModule.FileName, exe, StringComparison.OrdinalIgnoreCase))
                         {
-                            if (procs[i].MainWindowHandle != IntPtr.Zero)
-                                SetForegroundWindow(procs[i].MainWindowHandle);
                             status = part == 1 ? "Часть I уже запущена" : "Часть II уже запущена";
                             Touch();
+                            Process running = procs[i];
+                            ScreenMode chosen = Modes[mode];
+                            ThreadPool.QueueUserWorkItem(delegate
+                            {
+                                try { GameWindow.Fit(running, chosen.W, chosen.H, chosen.Screen); }
+                                catch { }
+                            });
                             return;
                         }
                     }
@@ -716,8 +769,18 @@ namespace BS
                 psi.FileName = exe;
                 psi.WorkingDirectory = Path.GetDirectoryName(exe);
                 psi.UseShellExecute = true;
-                Process.Start(psi);
-                Close();
+                Process game = Process.Start(psi);
+                status = "Запуск...";
+                Touch();
+                ScreenMode picked = Modes[mode];
+                Thread worker = new Thread(delegate ()
+                {
+                    try { GameWindow.Fit(game, picked.W, picked.H, picked.Screen); }
+                    catch { }
+                    BeginSafe(delegate { Close(); });
+                });
+                worker.IsBackground = true;
+                worker.Start();
             }
             catch (Exception)
             {
@@ -966,5 +1029,180 @@ namespace BS
             }
             base.Dispose(disposing);
         }
+    }
+
+    static class GameWindow
+    {
+        const uint SwpFrame = 0x0020;
+        const uint SwpShow = 0x0040;
+
+        public static void Fit(Process game, int width, int height, bool screen)
+        {
+            if (game == null) return;
+            IntPtr hwnd = IntPtr.Zero;
+            int ready = 0;
+            for (int i = 0; i < 40; i++)
+            {
+                try { if (game.HasExited) return; }
+                catch { return; }
+                hwnd = Find(game.Id);
+                if (hwnd != IntPtr.Zero)
+                {
+                    int cw;
+                    int ch;
+                    Client(hwnd, out cw, out ch);
+                    if (cw >= 600) ready++;
+                    if (ready >= 3) break;
+                }
+                Thread.Sleep(200);
+            }
+            if (hwnd == IntPtr.Zero) hwnd = Find(game.Id);
+            if (hwnd == IntPtr.Zero) return;
+            Place(hwnd, width, height, screen);
+            Thread.Sleep(700);
+            hwnd = Find(game.Id);
+            if (hwnd != IntPtr.Zero) Place(hwnd, width, height, screen);
+        }
+
+        static void Place(IntPtr hwnd, int width, int height, bool screen)
+        {
+            Rect window;
+            Rect client;
+            if (!GetWindowRect(hwnd, out window) || !GetClientRect(hwnd, out client)) return;
+            int frameX = (window.R - window.L) - (client.R - client.L);
+            int frameY = (window.B - window.T) - (client.B - client.T);
+            Rect work = WorkArea(hwnd);
+            int maxW = Math.Max(320, work.R - work.L);
+            int maxH = Math.Max(240, work.B - work.T);
+            int targetW = width;
+            int targetH = height;
+            if (screen)
+            {
+                targetH = maxH;
+                targetW = targetH * 4 / 3;
+                if (targetW > maxW)
+                {
+                    targetW = maxW;
+                    targetH = targetW * 3 / 4;
+                }
+                int style = GetStyle(hwnd);
+                style &= ~0x00C00000;
+                style &= ~0x00040000;
+                SetStyle(hwnd, style);
+                frameX = 0;
+                frameY = 0;
+            }
+            else if (targetW + frameX > maxW || targetH + frameY > maxH)
+            {
+                int fitW = maxW - frameX;
+                int fitH = maxH - frameY;
+                if (targetW * fitH > targetH * fitW)
+                {
+                    fitH = fitW * targetH / targetW;
+                }
+                else
+                {
+                    fitW = fitH * targetW / targetH;
+                }
+                targetW = Math.Max(320, fitW);
+                targetH = Math.Max(240, fitH);
+            }
+            int outerW = targetW + frameX;
+            int outerH = targetH + frameY;
+            int x = work.L + Math.Max(0, (maxW - outerW) / 2);
+            int y = work.T + Math.Max(0, (maxH - outerH) / 2);
+            SetWindowPos(hwnd, IntPtr.Zero, x, y, outerW, outerH, SwpFrame | SwpShow);
+        }
+
+        static Rect WorkArea(IntPtr hwnd)
+        {
+            IntPtr monitor = MonitorFromWindow(hwnd, 2);
+            MonitorInfo info = new MonitorInfo();
+            info.Size = Marshal.SizeOf(typeof(MonitorInfo));
+            if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info)) return info.Work;
+            Rect fallback = new Rect();
+            fallback.R = 1280;
+            fallback.B = 720;
+            return fallback;
+        }
+
+        static IntPtr Find(int pid)
+        {
+            IntPtr found = IntPtr.Zero;
+            EnumWindows(delegate (IntPtr h, IntPtr l)
+            {
+                uint owner;
+                GetWindowThreadProcessId(h, out owner);
+                if (owner != (uint)pid || !IsWindowVisible(h)) return true;
+                StringBuilder cls = new StringBuilder(64);
+                GetClassName(h, cls, 64);
+                found = h;
+                if (cls.ToString() == "RGSS Player") return false;
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
+
+        static void Client(IntPtr hwnd, out int w, out int h)
+        {
+            Rect r;
+            if (!GetClientRect(hwnd, out r)) { w = 0; h = 0; return; }
+            w = r.R - r.L;
+            h = r.B - r.T;
+        }
+
+        static int GetStyle(IntPtr hwnd)
+        {
+            if (IntPtr.Size == 8) return (int)GetWindowLongPtr64(hwnd, -16).ToInt64();
+            return GetWindowLong32(hwnd, -16);
+        }
+
+        static void SetStyle(IntPtr hwnd, int style)
+        {
+            if (IntPtr.Size == 8) SetWindowLongPtr64(hwnd, -16, new IntPtr(style));
+            else SetWindowLong32(hwnd, -16, style);
+        }
+
+        struct Rect
+        {
+            public int L, T, R, B;
+        }
+
+        struct MonitorInfo
+        {
+            public int Size;
+            public Rect Monitor;
+            public Rect Work;
+            public int Flags;
+        }
+
+        delegate bool EnumProc(IntPtr h, IntPtr l);
+
+        [DllImport("user32.dll")]
+        static extern bool EnumWindows(EnumProc cb, IntPtr l);
+        [DllImport("user32.dll")]
+        static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+        [DllImport("user32.dll")]
+        static extern bool IsWindowVisible(IntPtr h);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+        [DllImport("user32.dll")]
+        static extern bool GetWindowRect(IntPtr h, out Rect r);
+        [DllImport("user32.dll")]
+        static extern bool GetClientRect(IntPtr h, out Rect r);
+        [DllImport("user32.dll")]
+        static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll")]
+        static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+        static extern int GetWindowLong32(IntPtr h, int n);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+        static extern int SetWindowLong32(IntPtr h, int n, int value);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr")]
+        static extern IntPtr GetWindowLongPtr64(IntPtr h, int n);
+        [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr")]
+        static extern IntPtr SetWindowLongPtr64(IntPtr h, int n, IntPtr value);
     }
 }
